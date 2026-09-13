@@ -35,6 +35,7 @@ class MoovController extends ChangeNotifier {
 
   // Current workout session
   int? activeWorkoutId;
+  bool sessionActive = false;
   String activeActivity = 'Running';
   DateTime? sessionStart;
   int sessionSteps = 0;
@@ -49,6 +50,18 @@ class MoovController extends ChangeNotifier {
   double _pendingActiveSeconds = 0;
   DateTime? _lastFrameAt;
   DateTime? _lastSnapshotAt;
+  DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Rebuild at most ~16x/sec. The sensor stream runs at 50-100 Hz and
+  /// notifying on every frame rebuilds the whole widget tree that often,
+  /// which starves the main thread and makes buttons feel unresponsive.
+  void _notifyThrottled() {
+    final now = DateTime.now();
+    if (now.difference(_lastNotify).inMilliseconds >= 60) {
+      _lastNotify = now;
+      notifyListeners();
+    }
+  }
 
   Future<void> init() async {
     await _ble.ensurePermissions();
@@ -99,7 +112,7 @@ class MoovController extends ChangeNotifier {
       unawaited(_db.logSnapshot(f, workoutId: activeWorkoutId));
     }
 
-    notifyListeners();
+    _notifyThrottled();
   }
 
   Future<void> _flush() async {
@@ -141,29 +154,37 @@ class MoovController extends ChangeNotifier {
     sessionMaxImpact = 0;
     sessionCadence = 0;
     sessionStart = DateTime.now();
+    sessionActive = true;
+    notifyListeners(); // instant feedback; persistence follows
     activeWorkoutId = await _db.createWorkout(activity);
-    notifyListeners();
   }
 
   Future<void> stopWorkout() async {
     final id = activeWorkoutId;
     final start = sessionStart;
-    if (id == null || start == null) return;
+    if (!sessionActive || start == null) return;
 
     final duration = DateTime.now().difference(start).inSeconds;
+    final steps = sessionSteps;
+    final cadence = sessionCadence;
+    final impact = sessionMaxImpact;
+
+    // Clear the UI first, persist after.
+    sessionActive = false;
+    sessionStart = null;
+    activeWorkoutId = null;
+    notifyListeners();
+
+    if (id == null) return;
     await _db.finishWorkout(
       workoutId: id,
       durationSec: duration,
-      steps: sessionSteps,
-      avgCadence: sessionCadence,
-      maxImpact: sessionMaxImpact,
-      calories: sessionSteps * 0.045,
-      distanceKm: sessionSteps * 0.0008,
+      steps: steps,
+      avgCadence: cadence,
+      maxImpact: impact,
+      calories: steps * 0.045,
+      distanceKm: steps * 0.0008,
     );
-
-    activeWorkoutId = null;
-    sessionStart = null;
-    notifyListeners();
   }
 
   int get sessionDurationSec =>

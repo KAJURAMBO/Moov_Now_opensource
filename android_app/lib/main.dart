@@ -58,12 +58,20 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      DashboardScreen(controller: widget.controller),
-      LiveScreen(controller: widget.controller),
-      WorkoutScreen(controller: widget.controller),
-      HistoryScreen(controller: widget.controller),
-    ];
+    // Only the visible page is constructed. Building all four on every
+    // rebuild made each notify far more expensive than it needed to be.
+    Widget currentPage() {
+      switch (_index) {
+        case 0:
+          return DashboardScreen(controller: widget.controller);
+        case 1:
+          return LiveScreen(controller: widget.controller);
+        case 2:
+          return WorkoutScreen(controller: widget.controller);
+        default:
+          return HistoryScreen(key: const ValueKey('history'), controller: widget.controller);
+      }
+    }
 
     return AnimatedBuilder(
       animation: widget.controller,
@@ -77,7 +85,7 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ],
         ),
-        body: pages[_index],
+        body: currentPage(),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
           onDestinationSelected: (i) => setState(() => _index = i),
@@ -382,7 +390,7 @@ class WorkoutScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = controller.activeWorkoutId != null;
+    final active = controller.sessionActive;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
