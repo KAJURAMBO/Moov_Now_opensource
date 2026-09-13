@@ -44,6 +44,17 @@ class SensorFrame {
 class MoovDecoder {
   bool _stepArmed = false;
 
+  // Activity smoothing. Classifying each frame on its own makes the label
+  // flicker: at 50-100 Hz a single arm swing reads "Boxing" and the next
+  // frame reads "Idle". Classify the median of a short window instead, and
+  // require a new class to persist before adopting it.
+  final List<double> _recent = [];
+  static const int _window = 24;          // ~0.5 s at 50 Hz
+  String _activity = 'Idle';
+  String _pendingActivity = 'Idle';
+  int _pendingCount = 0;
+  static const int _switchAfter = 12;     // ~0.25 s of agreement
+
   /// Step thresholds. A step is counted on the rising edge through
   /// [_stepHigh] and the detector re-arms once the signal falls below
   /// [_stepLow]. This yields one count per bounce at any sample rate —
@@ -89,8 +100,40 @@ class MoovDecoder {
       roll: roll,
       sequence: data[moovSeqOffset],
       stepDetected: step,
-      activity: _classify(magnitude),
+      activity: _stableActivity(magnitude),
     );
+  }
+
+  /// Median magnitude over the recent window, so a single spike cannot change
+  /// the reported activity.
+  double _smoothedMagnitude(double magnitude) {
+    _recent.add(magnitude);
+    if (_recent.length > _window) _recent.removeAt(0);
+    final sorted = List<double>.from(_recent)..sort();
+    return sorted[sorted.length ~/ 2];
+  }
+
+  /// Adopts a new activity only after the smoothed reading has agreed with it
+  /// for several consecutive frames. Without this the label changes on every
+  /// outlier.
+  String _stableActivity(double magnitude) {
+    final candidate = _classify(_smoothedMagnitude(magnitude));
+    if (candidate == _activity) {
+      _pendingActivity = candidate;
+      _pendingCount = 0;
+      return _activity;
+    }
+    if (candidate == _pendingActivity) {
+      _pendingCount++;
+    } else {
+      _pendingActivity = candidate;
+      _pendingCount = 1;
+    }
+    if (_pendingCount >= _switchAfter) {
+      _activity = candidate;
+      _pendingCount = 0;
+    }
+    return _activity;
   }
 
   /// Accelerometer-only classification. At rest the magnitude is ~1 g, so
@@ -99,14 +142,23 @@ class MoovDecoder {
   /// Cycling cannot be detected from the accelerometer alone — it needs the
   /// gyroscope, which is not decoded yet. Users pick it from the workout tabs.
   static String _classify(double magnitude) {
-    if (magnitude > 2.60) return 'Boxing';
-    if (magnitude > 1.75) return 'Running';
-    if (magnitude > 1.15) return 'Walking';
+    // The accelerometer is ±2 g (16384 LSB/g, int16), so the largest magnitude
+    // the vector sum can reach is sqrt(3 * 2^2) = ~3.46 g. Any threshold above
+    // that is unreachable — an earlier 4.0 g "Boxing" cutoff could never fire.
+    // 3.0 g therefore means "close to the sensor's ceiling", i.e. a genuinely
+    // hard impact, while no longer triggering on walking arm swing (2.6 g did).
+    if (magnitude > 3.0) return 'Boxing';
+    if (magnitude > 1.90) return 'Running';
+    if (magnitude > 1.20) return 'Walking';
     return 'Idle';
   }
 
   /// Reset detector state — call when a new connection starts.
   void reset() {
     _stepArmed = false;
+    _recent.clear();
+    _activity = 'Idle';
+    _pendingActivity = 'Idle';
+    _pendingCount = 0;
   }
 }

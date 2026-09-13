@@ -43,12 +43,40 @@ void main() {
       expect(f.activity, 'Idle');
     });
 
-    test('classifies increasing magnitudes as walking then running', () {
+    test('classifies sustained walking then sustained running', () {
       final d = MoovDecoder();
-      // ~1.5 g
-      expect(d.decode(frameWithAccel(0, 0, -24576))!.activity, 'Walking');
-      // ~2.0 g
-      expect(d.decode(frameWithAccel(0, 0, -32768))!.activity, 'Running');
+      // Classification is smoothed, so it takes a run of frames to settle —
+      // the same thing that stops it flickering on real data.
+      String after(int ax, int ay, int az, int frames) {
+        late String a;
+        for (var i = 0; i < frames; i++) {
+          a = d.decode(frameWithAccel(ax, ay, az))!.activity;
+        }
+        return a;
+      }
+      // ~1.5 g sustained
+      expect(after(0, 0, -24576, 40), 'Walking');
+      // ~2.0 g sustained
+      expect(after(0, 0, -32768, 40), 'Running');
+    });
+
+    test('a single spike does not change the activity', () {
+      final d = MoovDecoder();
+      String feed(int az) => d.decode(frameWithAccel(0, 0, az))!.activity;
+
+      for (var i = 0; i < 40; i++) {
+        feed(-24576); // ~1.5 g: walking
+      }
+      expect(feed(-24576), 'Walking');
+
+      // One hard jolt - all three axes at the sensor's ±2 g ceiling, giving a
+      // magnitude near the 3.46 g maximum - then straight back to walking.
+      // The label must not flip on a single outlier; that was the flicker.
+      final jolt = d.decode(frameWithAccel(32767, 32767, 32767))!;
+      expect(jolt.magnitude, greaterThan(3.0)); // reaches the Boxing band
+      for (var i = 0; i < 5; i++) {
+        expect(feed(-24576), 'Walking');
+      }
     });
 
     test('counts one step per bounce, not one per frame', () {
