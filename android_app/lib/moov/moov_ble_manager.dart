@@ -234,8 +234,13 @@ class MoovBleManager {
     _enablingStream = true;
     try {
       writeAttempts++;
-      await char.write([moovEnableOn], withoutResponse: true);
-      enableWriteResult = 'ok (attempt $writeAttempts)';
+      // f000cd52 declares 'write' but NOT 'write-without-response'. Bleak on
+      // Windows tolerates a no-response write anyway; Android does not, and
+      // rejects it with GATT_WRITE_NOT_PERMITTED. Match the declared property.
+      final noResp = char.properties.writeWithoutResponse && !char.properties.write;
+      await char.write([moovEnableOn], withoutResponse: noResp);
+      enableWriteResult = 'ok (attempt $writeAttempts, '
+          '${noResp ? "no-response" : "with-response"})';
     } catch (e) {
       // Record it rather than swallow it: a failed enable write is exactly why
       // the app would sit on "Connected" with no data.
