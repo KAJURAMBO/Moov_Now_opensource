@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moov Now — Omni Motion 3D Fitness Dashboard</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Chart.js & Three.js CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">🏃</div>
+      <div class="brand-text">
+        <h1>MOOV NOW</h1>
+        <p>Omni Motion™ 3D Tracker</p>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="status-badge" id="status-badge">
+        <span class="status-indicator disconnected" id="status-indicator"></span>
+        <span id="status-text">Waiting for Moov</span>
+      </div>
+
+      <button class="btn btn-secondary" id="btn-open-scan">
+        📡 Scan Devices
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+    
+    <!-- Top Row: Daily Fitness Metrics -->
+    <section class="dashboard-grid" style="margin-bottom: 1.5rem;">
+      <div class="card stat-card col-span-3">
+        <div class="stat-label">DAILY STEPS</div>
+        <div class="stat-value" id="val-daily-steps">6,420</div>
+        <div class="stat-label" style="font-size: 0.75rem;">Goal: 10,000 steps</div>
+        <div class="stat-progress-bar">
+          <div class="stat-progress-fill" id="bar-steps" style="width: 64%;"></div>
+        </div>
+      </div>
+
+      <div class="card stat-card col-span-3">
+        <div class="stat-label">ACTIVE MINUTES</div>
+        <div class="stat-value" id="val-active-min">48 min</div>
+        <div class="stat-label" style="font-size: 0.75rem;">Goal: 60 minutes</div>
+        <div class="stat-progress-bar">
+          <div class="stat-progress-fill" id="bar-active" style="width: 80%; background: linear-gradient(90deg, var(--accent-violet), var(--accent-magenta));"></div>
+        </div>
+      </div>
+
+      <div class="card stat-card col-span-3">
+        <div class="stat-label">CALORIES BURNED</div>
+        <div class="stat-value" id="val-calories">485.0 kcal</div>
+        <div class="stat-label" style="font-size: 0.75rem;">Omni Motion calculated</div>
+        <div class="stat-progress-bar">
+          <div class="stat-progress-fill" id="bar-calories" style="width: 55%; background: linear-gradient(90deg, var(--accent-amber), #FF5E00);"></div>
+        </div>
+      </div>
+
+      <div class="card stat-card col-span-3">
+        <div class="stat-label">DISTANCE COVERED</div>
+        <div class="stat-value" id="val-distance">4.80 km</div>
+        <div class="stat-label" style="font-size: 0.75rem;">GPS & Stride estimated</div>
+        <div class="stat-progress-bar">
+          <div class="stat-progress-fill" id="bar-distance" style="width: 70%; background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Middle Row: 3D Orientation & Live 9-Axis Stream -->
+    <section class="dashboard-grid" style="margin-bottom: 1.5rem;">
+      
+      <!-- 3D Motion Orientation Viewport -->
+      <div class="card col-span-4">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🧭</span> 3D Motion Visualizer
+          </div>
+          <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono);" id="badge-activity">Walking</span>
+        </div>
+
+        <div id="canvas-3d-container"></div>
+
+        <div class="orientation-overlay" style="margin-top: 0.75rem;">
+          <div class="angle-badge">PITCH: <span id="val-pitch">0.0°</span></div>
+          <div class="angle-badge">ROLL: <span id="val-roll">0.0°</span></div>
+          <div class="angle-badge">YAW: <span id="val-yaw">0.0°</span></div>
+        </div>
+      </div>
+
+      <!-- Real-Time Telemetry Telemetry Stream Graph -->
+      <div class="card col-span-8">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">📈</span> Live 9-Axis Telemetry Stream
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary); font-family: var(--font-mono);">
+            Sampling Rate: <span style="color: var(--accent-green);">20 Hz</span>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="chart-telemetry"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom Row: Workout Coach Recorder & Workout History -->
+    <section class="dashboard-grid">
+      
+      <!-- Workout Coach Controls -->
+      <div class="card col-span-4">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">⏱️</span> Live Workout Coach
+          </div>
+        </div>
+
+        <div class="workout-controls">
+          <div class="activity-selector">
+            <button class="act-btn active" data-activity="Running">🏃 Run</button>
+            <button class="act-btn" data-activity="Cycling">🚴 Cycle</button>
+            <button class="act-btn" data-activity="Swimming">🏊 Swim</button>
+            <button class="act-btn" data-activity="Boxing">🥊 Box</button>
+            <button class="act-btn" data-activity="Walking">🚶 Walk</button>
+          </div>
+
+          <div class="workout-timer-display">
+            <div class="timer-time" id="timer-display">00:00:00</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.2rem;" id="timer-status">Ready to start recording</div>
+            
+            <div class="live-metrics-row">
+              <div class="live-metric-box">
+                <div class="val" id="workout-steps-val">0</div>
+                <div class="lbl">STEPS</div>
+              </div>
+              <div class="live-metric-box">
+                <div class="val" id="workout-cadence-val">0</div>
+                <div class="lbl">CADENCE (RPM)</div>
+              </div>
+              <div class="live-metric-box">
+                <div class="val" id="workout-impact-val">1.0g</div>
+                <div class="lbl">IMPACT FORCE</div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-accent" id="btn-workout-toggle" style="width: 100%; justify-content: center; padding: 0.9rem; font-size: 1.05rem;">
+            ▶️ Start Workout Session
+          </button>
+        </div>
+      </div>
+
+      <!-- Workout History Table -->
+      <div class="card col-span-8">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">📜</span> Recent Workout Sessions
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="workout-table">
+            <thead>
+              <tr>
+                <th>Activity</th>
+                <th>Date & Time</th>
+                <th>Duration</th>
+                <th>Steps</th>
+                <th>Avg Cadence</th>
+                <th>Max Impact</th>
+                <th>Calories</th>
+              </tr>
+            </thead>
+            <tbody id="workout-table-body">
+              <!-- Dynamically populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- BLE Scanner Modal Dialog -->
+  <div class="modal-backdrop" id="modal-scanner">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 style="font-size: 1.2rem; font-weight: 700;">📡 BLE Device Scanner</h3>
+        <button class="btn btn-secondary" id="btn-close-modal" style="padding: 0.3rem 0.6rem;">✕</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-secondary);">
+        Ensure your Moov Now hardware is pressed or shaken to wake it up into pairing mode.
+      </p>
+
+      <div class="device-list" id="ble-device-list">
+        <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+          Click "Start BLE Scan" to search for nearby hardware...
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; flex-wrap: wrap;">
+        <button class="btn btn-primary" id="btn-auto-latch" style="background: linear-gradient(135deg, #00f2fe, #4facfe); color: #000; font-weight: 700;">⚡ Instant Auto-Latch Moov</button>
+        <button class="btn btn-secondary" id="btn-scan-trigger">🔄 Start BLE Scan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Controller Application Script -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

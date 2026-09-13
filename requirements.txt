@@ -1,0 +1,18 @@
+# Moov Now Revival Platform — Python dependencies
+#
+# Install:  pip install -r requirements.txt
+#
+# The dashboard frontend pulls Three.js, Chart.js and its fonts from public CDNs,
+# so there are no frontend build steps or package managers to install.
+
+# Bluetooth Low Energy client (Windows 10+ / macOS / Linux).
+# Uses the Windows Runtime Bluetooth API on Windows.
+bleak>=0.22.0
+
+# Web server + WebSocket endpoint
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+
+# Request/response models used by the FastAPI endpoints
+pydantic>=2.0.0

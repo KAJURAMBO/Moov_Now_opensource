@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# Reverse-engineering scratch data — NOT for publication
+# ---------------------------------------------------------------------------
+# Decompiled Moov Coach app and the APK itself are proprietary/copyrighted.
+# Only the protocol findings documented in ble_tools/protocol_notes.md are
+# ours to publish. Never commit these.
+*.apk
+.tmp_apk/
+.tmp_moov_decompiled/
+.tmp_moov_repo/
+.tmp_*
+
+# ---------------------------------------------------------------------------
+# One-off reverse-engineering / diagnostic scripts (kept locally, not shipped)
+# ---------------------------------------------------------------------------
+ble_tools/explorer.py
+ble_tools/auto_connect.py
+ble_tools/check_moov_signal.py
+ble_tools/identify_moov.py
+ble_tools/moov_latch.py
+ble_tools/moov_sniffer.py
+ble_tools/probe_candidates.py
+run_explorer.py
+run_connect.py
+run_check.py
+run_identify.py
+run_latch.py
+run_sniffer.py
+run_probe.py
+
+# ---------------------------------------------------------------------------
+# Local runtime data
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+graphify-out/
+image.png
+plan.txt
+# Misnamed dump: this is an iPhone capture, not the Moov (contains personal device name)
+gatt_dump.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
