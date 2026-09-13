@@ -37,6 +37,11 @@ class MoovBleManager {
   int servicesFound = 0;
   List<String> serviceUuids = [];
   int writeAttempts = 0;
+  String lastError = '';
+  String lastCandidate = '';
+  String _lastCandidateAddr = '';
+  final Set<String> _blacklist = {};
+  int get blacklistSize => _blacklist.length;
   StreamSubscription<List<int>>? _valueSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   Timer? _keepAliveTimer;
@@ -110,8 +115,16 @@ class MoovBleManager {
           continue;
         }
         _setState(MoovConnectionState.connecting);
+        _lastCandidateAddr = candidate.remoteId.str;
+        lastCandidate = "${candidate.platformName.isEmpty ? "(no name)" : candidate.platformName} "
+            "$_lastCandidateAddr";
         await _connect(candidate);
-      } catch (_) {
+      } catch (e) {
+        // A device that fails to yield the Moov service is not a Moov. Ban it
+        // for the session, otherwise it wins the scan every cycle and starves
+        // the real device.
+        lastError = e.toString();
+        if (_lastCandidateAddr.isNotEmpty) _blacklist.add(_lastCandidateAddr);
         _setState(MoovConnectionState.waitingForDevice);
         await Future.delayed(const Duration(seconds: 2));
       }
@@ -132,6 +145,7 @@ class MoovBleManager {
 
     final sub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
+        if (_blacklist.contains(r.device.remoteId.str)) continue;
         final name = r.device.platformName.toLowerCase();
         final advName = r.advertisementData.advName.toLowerCase();
         final rssi = r.rssi;
@@ -182,7 +196,8 @@ class MoovBleManager {
     serviceUuids = services.map((x) => x.uuid.str.toLowerCase()).toList();
     final service = services.firstWhere(
       (s) => s.uuid.str.toLowerCase() == moovServiceUuid,
-      orElse: () => throw StateError('Moov sensor service not found'),
+      orElse: () => throw StateError(
+          'not a Moov: no f000cd50 among ${services.length} services'),
     );
 
     // 1. Subscribe to the data characteristic only.
