@@ -71,6 +71,7 @@ class MoovController extends ChangeNotifier {
     // before scanning so the app can also acquire a connection in the
     // background, not just keep one.
     await MoovForeground.requestPermission();
+    await MoovForeground.requestBatteryExemption();
     await MoovForeground.start(text: 'Looking for your Moov…');
 
     _frameSub = _ble.frames.listen(_onFrame);

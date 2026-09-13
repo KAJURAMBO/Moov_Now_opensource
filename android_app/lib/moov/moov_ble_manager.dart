@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'moov_decoder.dart';
+import 'moov_foreground.dart';
 import 'moov_protocol.dart';
 
 enum MoovConnectionState { idle, scanning, connecting, connected, waitingForDevice }
@@ -37,17 +38,22 @@ class MoovBleManager {
   int servicesFound = 0;
   List<String> serviceUuids = [];
   int writeAttempts = 0;
+  int scanStarts = 0;
   String lastError = '';
   String lastCandidate = '';
   String _lastCandidateAddr = '';
   final Set<String> _blacklist = {};
   int get blacklistSize => _blacklist.length;
+
   StreamSubscription<List<int>>? _valueSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
+  StreamSubscription<List<ScanResult>>? _scanSub;
   Timer? _keepAliveTimer;
   DateTime? _lastFrameAt;
   bool _autoConnectRunning = false;
   bool _enablingStream = false;
+  bool _connectInProgress = false;
+  BluetoothDevice? _fallbackCandidate;
 
   BluetoothDevice? get device => _device;
   String get deviceName => _device?.platformName.isNotEmpty == true
@@ -93,107 +99,116 @@ class MoovBleManager {
   // Auto-connect
   // ---------------------------------------------------------------------------
 
-  /// Starts the always-on connect loop: scan, connect, stream, recover.
-  /// Safe to call repeatedly.
+  /// Starts the always-on connect engine. Safe to call repeatedly.
   Future<void> startAutoConnect() async {
     if (_autoConnectRunning) return;
     _autoConnectRunning = true;
-    unawaited(_autoConnectLoop());
+    _scanSub ??= FlutterBluePlus.scanResults.listen(_onScanResults);
+    unawaited(_scanLoop());
   }
 
-  Future<void> _autoConnectLoop() async {
+  /// Keeps one long scan running while disconnected.
+  ///
+  /// Android throttles apps to 5 scan *starts* per 30 seconds. The previous
+  /// scan / stop / scan cycle every 8 s sat right on that limit, so the OS
+  /// delayed the scans and connecting felt slow. A single long scan with a
+  /// periodic restart stays well under it.
+  Future<void> _scanLoop() async {
     while (_autoConnectRunning) {
-      if (_device != null && _isConnected) {
-        await Future.delayed(const Duration(seconds: 2));
+      if (_connectInProgress || (_device != null && _isConnected)) {
+        await Future.delayed(const Duration(milliseconds: 500));
         continue;
       }
+      _setState(MoovConnectionState.scanning);
       try {
-        _setState(MoovConnectionState.scanning);
-        final candidate = await _findMoov(timeout: const Duration(seconds: 8));
-        if (candidate == null) {
-          _setState(MoovConnectionState.waitingForDevice);
-          continue;
-        }
-        _setState(MoovConnectionState.connecting);
-        _lastCandidateAddr = candidate.remoteId.str;
-        lastCandidate = "${candidate.platformName.isEmpty ? "(no name)" : candidate.platformName} "
-            "$_lastCandidateAddr";
-        await _connect(candidate);
+        scanStarts++;
+        await FlutterBluePlus.startScan(
+          timeout: const Duration(seconds: 25),
+          continuousUpdates: true,
+        );
       } catch (e) {
-        // A device that fails to yield the Moov service is not a Moov. Ban it
-        // for the session, otherwise it wins the scan every cycle and starves
-        // the real device.
-        lastError = e.toString();
-        if (_lastCandidateAddr.isNotEmpty) _blacklist.add(_lastCandidateAddr);
-        _setState(MoovConnectionState.waitingForDevice);
+        lastError = 'scan: $e';
         await Future.delayed(const Duration(seconds: 2));
       }
     }
+  }
+
+  void _onScanResults(List<ScanResult> results) {
+    if (_connectInProgress) return;
+    if (_device != null && _isConnected) return;
+
+    for (final r in results) {
+      if (_blacklist.contains(r.device.remoteId.str)) continue;
+
+      final name = r.device.platformName.toLowerCase();
+      final advName = r.advertisementData.advName.toLowerCase();
+      final nameMatch =
+          moovNameHints.any((h) => name.contains(h) || advName.contains(h));
+      final svcUuids =
+          r.advertisementData.serviceUuids.map((g) => g.str.toLowerCase());
+      final uuidMatch =
+          svcUuids.any((u) => moovAdvUuids.any((frag) => u.contains(frag)));
+
+      if (nameMatch || uuidMatch) {
+        _beginConnect(r.device);
+        return;
+      }
+
+      // The Moov normally advertises as an unnamed device with no service
+      // UUIDs, so signal strength is the only remaining clue. It is a
+      // fallback only: a device that fails to yield the sensor service is
+      // blacklisted, so it cannot win the scan on every cycle.
+      if (r.rssi > -70) _fallbackCandidate ??= r.device;
+    }
+
+    final fb = _fallbackCandidate;
+    if (fb != null && !_blacklist.contains(fb.remoteId.str)) {
+      _fallbackCandidate = null;
+      _beginConnect(fb);
+    }
+  }
+
+  void _beginConnect(BluetoothDevice d) {
+    if (_connectInProgress) return;
+    if (_device != null && _isConnected) return;
+    _connectInProgress = true;
+
+    _lastCandidateAddr = d.remoteId.str;
+    lastCandidate = "${d.platformName.isEmpty ? "(no name)" : d.platformName} "
+        "$_lastCandidateAddr";
+
+    unawaited(() async {
+      try {
+        await FlutterBluePlus.stopScan();
+        _setState(MoovConnectionState.connecting);
+        await _connect(d);
+      } catch (e) {
+        lastError = e.toString();
+        if (_lastCandidateAddr.isNotEmpty) _blacklist.add(_lastCandidateAddr);
+        _setState(MoovConnectionState.waitingForDevice);
+      } finally {
+        _connectInProgress = false;
+      }
+    }());
   }
 
   bool get _isConnected => _device?.isConnected ?? false;
 
-  /// Scans and returns the first plausible Moov.
-  ///
-  /// The device usually advertises as "Unknown Device" with no service UUIDs,
-  /// so a name match or a Moov service UUID wins immediately, and a strong
-  /// unnamed signal is accepted as a fallback — the same tiering used on the
-  /// desktop bridge.
-  Future<BluetoothDevice?> _findMoov({required Duration timeout}) async {
-    BluetoothDevice? named;
-    BluetoothDevice? fallback;
-
-    final sub = FlutterBluePlus.scanResults.listen((results) {
-      for (final r in results) {
-        if (_blacklist.contains(r.device.remoteId.str)) continue;
-        final name = r.device.platformName.toLowerCase();
-        final advName = r.advertisementData.advName.toLowerCase();
-        final rssi = r.rssi;
-
-        final nameMatch = moovNameHints.any((h) => name.contains(h) || advName.contains(h));
-        final svcUuids = r.advertisementData.serviceUuids.map((g) => g.str.toLowerCase());
-        final uuidMatch = svcUuids.any(
-          (u) => moovAdvUuids.any((frag) => u.contains(frag)),
-        );
-
-        if (nameMatch || uuidMatch) {
-          named ??= r.device;
-        } else if (rssi > -75) {
-          fallback ??= r.device;
-        }
-      }
-    });
-
-    try {
-      await FlutterBluePlus.startScan(timeout: timeout, continuousUpdates: true);
-      final deadline = DateTime.now().add(timeout);
-      while (DateTime.now().isBefore(deadline)) {
-        if (named != null) return named;
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-      return named ?? fallback;
-    } finally {
-      await sub.cancel();
-      await FlutterBluePlus.stopScan();
-    }
-  }
-
   Future<void> _connect(BluetoothDevice device) async {
-    await device.connect(timeout: const Duration(seconds: 12));
+    await device.connect(timeout: const Duration(seconds: 15));
     _device = device;
 
     // Recover automatically when the link drops (the firmware sleeps the
     // stream regularly, and the link occasionally follows).
     await _connSub?.cancel();
     _connSub = device.connectionState.listen((s) {
-      if (s == BluetoothConnectionState.disconnected) {
-        _onDisconnected();
-      }
+      if (s == BluetoothConnectionState.disconnected) _onDisconnected();
     });
 
     final services = await device.discoverServices();
     servicesFound = services.length;
     serviceUuids = services.map((x) => x.uuid.str.toLowerCase()).toList();
+
     final service = services.firstWhere(
       (s) => s.uuid.str.toLowerCase() == moovServiceUuid,
       orElse: () => throw StateError(
@@ -253,9 +268,7 @@ class MoovBleManager {
   void _onPacket(List<int> value) {
     _lastFrameAt = DateTime.now();
     packetsReceived++;
-    lastPacketHex = value
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    lastPacketHex = value.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     final frame = _decoder.decode(Uint8List.fromList(value));
     if (frame != null && !_frameController.isClosed) {
       _frameController.add(frame);
@@ -288,7 +301,7 @@ class MoovBleManager {
     _enableChar = null;
     _device = null;
     _setState(MoovConnectionState.waitingForDevice);
-    // The auto-connect loop observes the cleared device and rescans.
+    // The scan loop observes the cleared device and resumes scanning.
   }
 
   // ---------------------------------------------------------------------------
@@ -309,6 +322,8 @@ class MoovBleManager {
 
   Future<void> dispose() async {
     _autoConnectRunning = false;
+    await _scanSub?.cancel();
+    await MoovForeground.stop();
     await disconnect();
     await _frameController.close();
     await _stateController.close();

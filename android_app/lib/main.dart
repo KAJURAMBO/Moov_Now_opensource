@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'moov/moov_ble_manager.dart';
+import 'moov/moov_foreground.dart';
 import 'moov_controller.dart';
 
 void main() => runApp(const MoovApp());
@@ -294,6 +295,10 @@ class LiveScreen extends StatelessWidget {
               _DiagRow('last packet', ble.lastPacketHex.isEmpty ? '-' : ble.lastPacketHex),
               _DiagRow('candidate', ble.lastCandidate.isEmpty ? '-' : ble.lastCandidate),
               _DiagRow('blacklisted', '${ble.blacklistSize}'),
+              _DiagRow('scan starts', '${ble.scanStarts}'),
+              _DiagRow('bg service', MoovForeground.running ? 'running' : 'NOT running'),
+              _DiagRow('battery exempt', MoovForeground.batteryExempt ? 'yes' : 'no'),
+              _DiagRow('service error', MoovForeground.lastError.isEmpty ? '-' : MoovForeground.lastError),
               _DiagRow('last error', ble.lastError.isEmpty ? '-' : ble.lastError),
               const SizedBox(height: 8),
               Text('services: ${ble.serviceUuids.join(", ")}',

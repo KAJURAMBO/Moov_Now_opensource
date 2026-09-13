@@ -17,6 +17,12 @@ class MoovForeground {
   static const int _serviceId = 301;
   static bool _initialised = false;
 
+  /// Diagnostics, surfaced in the UI. A service that silently failed to start
+  /// looks exactly like one that is running, until the phone is locked.
+  static bool running = false;
+  static String lastError = '';
+  static bool batteryExempt = false;
+
   static void _init() {
     if (_initialised) return;
     FlutterForegroundTask.init(
@@ -67,10 +73,13 @@ class MoovForeground {
         notificationTitle: 'Moov Now',
         notificationText: text,
       );
-    } catch (_) {
-      // A failure here degrades to foreground-only behaviour, which still
-      // works while the app is open - not worth crashing over.
+      lastError = '';
+    } catch (e) {
+      // Recorded rather than swallowed: if the service did not start, tracking
+      // stops the moment the screen locks, and the reason matters.
+      lastError = e.toString();
     }
+    running = await isRunning();
   }
 
   static Future<void> stop() async {
@@ -79,5 +88,30 @@ class MoovForeground {
         await FlutterForegroundTask.stopService();
       }
     } catch (_) {}
+    running = false;
+  }
+
+  static Future<bool> isRunning() async {
+    try {
+      return await FlutterForegroundTask.isRunningService;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Asks the OS to stop managing this app's battery.
+  ///
+  /// Many manufacturers (Xiaomi, Oppo, Vivo, Samsung) kill foreground services
+  /// anyway unless the app is exempt from battery optimisation. Android shows a
+  /// system dialog; the user has to accept it.
+  static Future<void> requestBatteryExemption() async {
+    try {
+      batteryExempt = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+      if (!batteryExempt) {
+        batteryExempt = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+    } catch (e) {
+      lastError = 'battery: $e';
+    }
   }
 }
