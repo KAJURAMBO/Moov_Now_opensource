@@ -318,6 +318,40 @@ class LiveScreen extends StatelessWidget {
             ]),
           ),
         ),
+
+        // Live scan list: shows whether the Moov is being seen at all, and
+        // what the scanner decided about each device.
+        const SizedBox(height: 12),
+        Card(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Devices seen (${ble.scanList.length})',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                'known = remembered Moov      name-match = advertised as Moov\n'
+                'candidate = used as fallback      ignored = too weak\n'
+                'blacklisted = failed to connect before',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              if (ble.scanList.isEmpty)
+                const Text('nothing seen yet', style: TextStyle(fontSize: 12))
+              else
+                ...ble.scanList.take(12).map((d) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(d.address,
+                            style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                        Text('${d.rssi} dBm  ${d.name}  [${d.verdict}]',
+                            style: Theme.of(context).textTheme.bodySmall),
+                      ]),
+                    )),
+            ]),
+          ),
+        ),
       ],
     );
   }

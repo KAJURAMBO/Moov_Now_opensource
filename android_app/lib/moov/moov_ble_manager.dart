@@ -11,6 +11,15 @@ import 'moov_protocol.dart';
 
 enum MoovConnectionState { idle, scanning, connecting, connected, waitingForDevice }
 
+/// One device seen during a scan, with the decision made about it.
+class ScannedDevice {
+  final String address;
+  final String name;
+  final int rssi;
+  final String verdict; // known | name-match | candidate | ignored | blacklisted
+  const ScannedDevice(this.address, this.name, this.rssi, this.verdict);
+}
+
 /// Owns the BLE link to the Moov Now.
 ///
 /// This is the Android equivalent of `backend/ble_bridge.py`: it scans, picks
@@ -25,6 +34,11 @@ class MoovBleManager {
   final MoovDecoder _decoder = MoovDecoder();
   final _frameController = StreamController<SensorFrame>.broadcast();
   final _stateController = StreamController<MoovConnectionState>.broadcast();
+  final _scanListController = StreamController<List<ScannedDevice>>.broadcast();
+  List<ScannedDevice> scanList = [];
+
+  /// Everything the scanner is currently seeing, and what it decided.
+  Stream<List<ScannedDevice>> get scanListStream => _scanListController.stream;
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _enableChar;
@@ -183,6 +197,8 @@ class MoovBleManager {
   }
 
   void _onScanResults(List<ScanResult> results) {
+    _publishScanList(results);
+
     if (_connectInProgress) return;
     if (_device != null && _isConnected) return;
 
@@ -245,6 +261,40 @@ class MoovBleManager {
       _fallbackCandidate = null;
       _beginConnect(fb);
     }
+  }
+
+  /// Snapshot of the current scan, for the Diagnostics panel. Lets you see
+  /// whether the Moov is being seen at all, and which verdict it got.
+  void _publishScanList(List<ScanResult> results) {
+    if (_scanListController.isClosed) return;
+    final out = <ScannedDevice>[];
+    for (final r in results) {
+      final addr = r.device.remoteId.str;
+      final nm = r.advertisementData.advName.isNotEmpty
+          ? r.advertisementData.advName
+          : (r.device.platformName.isEmpty ? '(no name)' : r.device.platformName);
+      final lname = nm.toLowerCase();
+
+      String verdict;
+      if (_blacklist.contains(addr)) {
+        verdict = 'blacklisted';
+      } else if (knownMoovAddr.isNotEmpty &&
+          addr.toLowerCase() == knownMoovAddr.toLowerCase()) {
+        verdict = 'known';
+      } else if (moovNameHints.any((h) => lname.contains(h)) ||
+          r.advertisementData.serviceUuids.any((g) =>
+              moovAdvUuids.any((f) => g.str.toLowerCase().contains(f)))) {
+        verdict = 'name-match';
+      } else if (r.rssi > _fallbackRssi) {
+        verdict = 'candidate';
+      } else {
+        verdict = 'ignored';
+      }
+      out.add(ScannedDevice(addr, nm, r.rssi, verdict));
+    }
+    out.sort((a, b) => b.rssi.compareTo(a.rssi));
+    scanList = out;
+    _scanListController.add(out);
   }
 
   void _beginConnect(BluetoothDevice d) {
@@ -412,5 +462,6 @@ class MoovBleManager {
     await disconnect();
     await _frameController.close();
     await _stateController.close();
+    await _scanListController.close();
   }
 }

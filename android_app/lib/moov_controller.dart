@@ -21,6 +21,7 @@ class MoovController extends ChangeNotifier {
 
   StreamSubscription<SensorFrame>? _frameSub;
   StreamSubscription<MoovConnectionState>? _stateSub;
+  StreamSubscription<List<ScannedDevice>>? _scanListSub;
   Timer? _flushTimer;
 
   // Live values
@@ -68,6 +69,7 @@ class MoovController extends ChangeNotifier {
     await _ble.ensurePermissions();
 
     _frameSub = _ble.frames.listen(_onFrame);
+    _scanListSub = _ble.scanListStream.listen((_) => notifyListeners());
     _stateSub = _ble.state.listen((s) {
       connectionState = s;
       if (s == MoovConnectionState.connected) deviceName = _ble.deviceName;
@@ -219,6 +221,7 @@ class MoovController extends ChangeNotifier {
     _flushTimer?.cancel();
     _frameSub?.cancel();
     _stateSub?.cancel();
+    _scanListSub?.cancel();
     _ble.dispose();
     super.dispose();
   }
