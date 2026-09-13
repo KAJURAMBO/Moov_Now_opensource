@@ -54,6 +54,9 @@ class MoovBleManager {
   bool _enablingStream = false;
   bool _connectInProgress = false;
   BluetoothDevice? _fallbackCandidate;
+  final Map<String, int> _sightings = {};
+  static const int _sightingsNeeded = 3;   // seen on 3 separate scan emissions
+  static const int _fallbackRssi = -65;    // and genuinely close
 
   BluetoothDevice? get device => _device;
   String get deviceName => _device?.platformName.isNotEmpty == true
@@ -155,10 +158,20 @@ class MoovBleManager {
       }
 
       // The Moov normally advertises as an unnamed device with no service
-      // UUIDs, so signal strength is the only remaining clue. It is a
-      // fallback only: a device that fails to yield the sensor service is
-      // blacklisted, so it cannot win the scan on every cycle.
-      if (r.rssi > -70) _fallbackCandidate ??= r.device;
+      // UUIDs, so signal strength is the only remaining clue.
+      //
+      // This used to connect to the first strong device it saw, which meant
+      // burning a 15 s connect timeout on a nearby non-Moov while the user
+      // was pressing their actual device. The fallback now has to be seen on
+      // several separate scan emissions and be genuinely close, so a device
+      // that merely drifts past is ignored.
+      final addr = r.device.remoteId.str;
+      if (r.rssi > _fallbackRssi) {
+        _sightings[addr] = (_sightings[addr] ?? 0) + 1;
+        if (_sightings[addr]! >= _sightingsNeeded) {
+          _fallbackCandidate ??= r.device;
+        }
+      }
     }
 
     final fb = _fallbackCandidate;
@@ -195,7 +208,9 @@ class MoovBleManager {
   bool get _isConnected => _device?.isConnected ?? false;
 
   Future<void> _connect(BluetoothDevice device) async {
-    await device.connect(timeout: const Duration(seconds: 15));
+    // Short timeout: the Moov answers immediately when awake, and a wrong
+    // device should fail fast rather than block the queue.
+    await device.connect(timeout: const Duration(seconds: 8));
     _device = device;
 
     // Recover automatically when the link drops (the firmware sleeps the

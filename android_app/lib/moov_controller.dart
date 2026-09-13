@@ -67,13 +67,6 @@ class MoovController extends ChangeNotifier {
   Future<void> init() async {
     await _ble.ensurePermissions();
 
-    // Hold a foreground service so the link survives screen-lock. Started
-    // before scanning so the app can also acquire a connection in the
-    // background, not just keep one.
-    await MoovForeground.requestPermission();
-    await MoovForeground.requestBatteryExemption();
-    await MoovForeground.start(text: 'Looking for your Moov…');
-
     _frameSub = _ble.frames.listen(_onFrame);
     _stateSub = _ble.state.listen((s) {
       connectionState = s;
@@ -86,9 +79,17 @@ class MoovController extends ChangeNotifier {
       notifyListeners();
     });
 
-    await refreshToday();
+    // Start listening before the notification and battery-optimisation
+    // prompts. Those are modal system dialogs, and waiting on them meant the
+    // app was not scanning yet when the user pressed the Moov button - the
+    // advertisement lasts only a few seconds and was simply missed.
     await _ble.startAutoConnect();
 
+    await MoovForeground.requestPermission();
+    await MoovForeground.start(text: 'Looking for your Moov…');
+    unawaited(MoovForeground.requestBatteryExemption());
+
+    await refreshToday();
     _flushTimer = Timer.periodic(const Duration(seconds: 1), (_) => _flush());
     notifyListeners();
   }
