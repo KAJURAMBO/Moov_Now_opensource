@@ -59,8 +59,14 @@ class MoovBleManager {
   bool _connectInProgress = false;
   BluetoothDevice? _fallbackCandidate;
   final Map<String, int> _sightings = {};
-  static const int _sightingsNeeded = 3;   // seen on 3 separate scan emissions
-  static const int _fallbackRssi = -65;    // and genuinely close
+  static const int _sightingsNeeded = 2;   // seen on 2 separate scan emissions
+  // -80, not -65. The Moov was connecting at -70 to -86 dBm on the desktop;
+  // a -65 cutoff meant nothing ever qualified and the app scanned forever.
+  static const int _fallbackRssi = -80;
+  /// MAC of a device that has already been confirmed as the Moov this session.
+  /// Connecting to a known-good address immediately skips the whole
+  /// name/fallback decision on every reconnect.
+  String knownMoovAddr = '';
 
   BluetoothDevice? get device => _device;
   String get deviceName => _device?.platformName.isNotEmpty == true
@@ -145,7 +151,16 @@ class MoovBleManager {
     if (_device != null && _isConnected) return;
 
     for (final r in results) {
-      if (_blacklist.contains(r.device.remoteId.str)) continue;
+      final addr0 = r.device.remoteId.str;
+      if (_blacklist.contains(addr0)) continue;
+
+      // Fast path: we have already proven this address is the Moov.
+      if (knownMoovAddr.isNotEmpty && addr0 == knownMoovAddr) {
+        lastMatchKind = 'known';
+        nameMatches++;
+        _beginConnect(r.device);
+        return;
+      }
 
       final name = r.device.platformName.toLowerCase();
       final advName = r.advertisementData.advName.toLowerCase();
@@ -263,6 +278,9 @@ class MoovBleManager {
     );
     enableCharFound = true;
     await _writeEnable();
+
+    // Proven Moov - remember it so reconnects skip the discovery dance.
+    knownMoovAddr = device.remoteId.str;
 
     _decoder.reset();
     _lastFrameAt = DateTime.now();
