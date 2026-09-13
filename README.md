@@ -93,6 +93,7 @@ its own, no UI interaction needed.
 |---|---|
 | `REVIVAL_NOTES.md` | Work log: every bug found and fixed, device power behaviour, known limitations |
 | `ble_tools/protocol_notes.md` | Verified BLE protocol — GATT map, connect/stream sequence, packet format |
+| `ANDROID_PORT.md` | Spec for a local-only native Android tracker (no backend, no cloud) |
 
 ---
 
