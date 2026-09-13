@@ -10,7 +10,7 @@ on:
       dry_run:
         description: 'Build only - skip the Play upload'
         type: boolean
-        default: true
+        default: false   # manual runs upload; set true for a build-only check
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
