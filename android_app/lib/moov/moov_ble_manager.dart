@@ -40,6 +40,10 @@ class MoovBleManager {
   int writeAttempts = 0;
   int scanStarts = 0;
   String lastError = '';
+  String lastMatchKind = '';     // name | uuid | fallback
+  String lastCandidateAdvName = '';
+  int nameMatches = 0;
+  int fallbackMatches = 0;
   String lastCandidate = '';
   String _lastCandidateAddr = '';
   final Set<String> _blacklist = {};
@@ -153,6 +157,12 @@ class MoovBleManager {
           svcUuids.any((u) => moovAdvUuids.any((frag) => u.contains(frag)));
 
       if (nameMatch || uuidMatch) {
+        // Recorded so the Diagnostics panel shows whether Android is actually
+        // reporting an advertised name. If it never matches here, every
+        // connection is going through the slow fallback path.
+        lastMatchKind = nameMatch ? 'name' : 'uuid';
+        nameMatches++;
+        lastCandidateAdvName = r.advertisementData.advName;
         _beginConnect(r.device);
         return;
       }
@@ -176,6 +186,8 @@ class MoovBleManager {
 
     final fb = _fallbackCandidate;
     if (fb != null && !_blacklist.contains(fb.remoteId.str)) {
+      lastMatchKind = 'fallback';
+      fallbackMatches++;
       _fallbackCandidate = null;
       _beginConnect(fb);
     }
