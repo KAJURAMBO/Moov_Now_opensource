@@ -220,40 +220,99 @@ class LiveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final f = controller.frame;
-    if (f == null) {
-      return const Center(child: Text('Waiting for sensor data…'));
-    }
+    final ble = controller.ble;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(children: [
-              Text(f.activity, style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 12),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                _Metric(label: 'PITCH', value: '${f.pitch.toStringAsFixed(1)}°'),
-                _Metric(label: 'ROLL', value: '${f.roll.toStringAsFixed(1)}°'),
-                _Metric(label: 'IMPACT', value: '${f.magnitude.toStringAsFixed(2)}g'),
+        if (f == null)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('Waiting for sensor data...'),
+            ),
+          )
+        else ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(children: [
+                Text(f.activity, style: Theme.of(context).textTheme.headlineSmall),
+                const SizedBox(height: 12),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _Metric(label: 'PITCH', value: '${f.pitch.toStringAsFixed(1)} deg'),
+                  _Metric(label: 'ROLL', value: '${f.roll.toStringAsFixed(1)} deg'),
+                  _Metric(label: 'IMPACT', value: '${f.magnitude.toStringAsFixed(2)}g'),
+                ]),
               ]),
-            ]),
+            ),
           ),
-        ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Accelerometer (g)', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                _AxisBar(label: 'X', value: f.ax),
+                _AxisBar(label: 'Y', value: f.ay),
+                _AxisBar(label: 'Z', value: f.az),
+              ]),
+            ),
+          ),
+        ],
+
+        // Field diagnostics. If the app says "Connected" but shows no data, this
+        // says which step of the handshake failed.
         const SizedBox(height: 12),
         Card(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Accelerometer (g)', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              _AxisBar(label: 'X', value: f.ax),
-              _AxisBar(label: 'Y', value: f.ay),
-              _AxisBar(label: 'Z', value: f.az),
+              Text('Diagnostics', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              _DiagRow('state', ble.currentState.name),
+              _DiagRow('device', controller.deviceName),
+              _DiagRow('services found', '${ble.servicesFound}'),
+              _DiagRow('sensor service', ble.serviceUuids.contains(
+                      'f000cd50-0451-4000-b000-000000000000') ? 'present' : 'MISSING'),
+              _DiagRow('data char (cd51)', ble.dataCharFound ? 'found' : 'not found'),
+              _DiagRow('notify subscribed', ble.notifySubscribed ? 'yes' : 'no'),
+              _DiagRow('enable char (cd52)', ble.enableCharFound ? 'found' : 'not found'),
+              _DiagRow('enable write', ble.enableWriteResult),
+              _DiagRow('write attempts', '${ble.writeAttempts}'),
+              _DiagRow('packets received', '${ble.packetsReceived}'),
+              _DiagRow('last packet', ble.lastPacketHex.isEmpty ? '-' : ble.lastPacketHex),
+              const SizedBox(height: 8),
+              Text('services: ${ble.serviceUuids.join(", ")}',
+                  style: Theme.of(context).textTheme.bodySmall),
             ]),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _DiagRow extends StatelessWidget {
+  const _DiagRow(this.label, this.value);
+  final String label, value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 130,
+          child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+        ),
+      ]),
     );
   }
 }

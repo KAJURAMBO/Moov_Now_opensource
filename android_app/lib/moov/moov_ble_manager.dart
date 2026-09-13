@@ -26,6 +26,17 @@ class MoovBleManager {
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _enableChar;
+
+  // ---- diagnostics (surfaced in the UI so a field failure is visible without logcat)
+  int packetsReceived = 0;
+  String lastPacketHex = '';
+  String enableWriteResult = 'not attempted';
+  bool dataCharFound = false;
+  bool enableCharFound = false;
+  bool notifySubscribed = false;
+  int servicesFound = 0;
+  List<String> serviceUuids = [];
+  int writeAttempts = 0;
   StreamSubscription<List<int>>? _valueSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   Timer? _keepAliveTimer;
@@ -167,6 +178,8 @@ class MoovBleManager {
     });
 
     final services = await device.discoverServices();
+    servicesFound = services.length;
+    serviceUuids = services.map((x) => x.uuid.str.toLowerCase()).toList();
     final service = services.firstWhere(
       (s) => s.uuid.str.toLowerCase() == moovServiceUuid,
       orElse: () => throw StateError('Moov sensor service not found'),
@@ -175,14 +188,23 @@ class MoovBleManager {
     // 1. Subscribe to the data characteristic only.
     final dataChar = service.characteristics.firstWhere(
       (c) => c.uuid.str.toLowerCase() == moovDataCharUuid,
+      orElse: () => throw StateError('data char not found'),
     );
+    dataCharFound = true;
     await dataChar.setNotifyValue(true);
+    notifySubscribed = true;
     _valueSub = dataChar.onValueReceived.listen(_onPacket);
+
+    // Let the CCCD write settle before issuing the enable write. Android can
+    // drop a characteristic write issued in the same breath as setNotifyValue.
+    await Future.delayed(const Duration(milliseconds: 300));
 
     // 2. Enable the stream. Only cd52 — writing cd53/cd54 drops the link.
     _enableChar = service.characteristics.firstWhere(
       (c) => c.uuid.str.toLowerCase() == moovEnableCharUuid,
+      orElse: () => throw StateError('enable char not found'),
     );
+    enableCharFound = true;
     await _writeEnable();
 
     _decoder.reset();
@@ -196,9 +218,13 @@ class MoovBleManager {
     if (char == null || _enablingStream) return;
     _enablingStream = true;
     try {
+      writeAttempts++;
       await char.write([moovEnableOn], withoutResponse: true);
-    } catch (_) {
-      // Link went away mid-write; the connection listener will recover it.
+      enableWriteResult = 'ok (attempt $writeAttempts)';
+    } catch (e) {
+      // Record it rather than swallow it: a failed enable write is exactly why
+      // the app would sit on "Connected" with no data.
+      enableWriteResult = 'FAILED: $e';
     } finally {
       _enablingStream = false;
     }
@@ -206,6 +232,10 @@ class MoovBleManager {
 
   void _onPacket(List<int> value) {
     _lastFrameAt = DateTime.now();
+    packetsReceived++;
+    lastPacketHex = value
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
     final frame = _decoder.decode(Uint8List.fromList(value));
     if (frame != null && !_frameController.isClosed) {
       _frameController.add(frame);

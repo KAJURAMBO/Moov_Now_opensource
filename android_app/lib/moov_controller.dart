@@ -13,6 +13,9 @@ class MoovController extends ChangeNotifier {
   MoovController({MoovBleManager? ble}) : _ble = ble ?? MoovBleManager();
 
   final MoovBleManager _ble;
+
+  /// Exposed for the diagnostics panel only.
+  MoovBleManager get ble => _ble;
   final MoovDatabase _db = MoovDatabase.instance;
 
   StreamSubscription<SensorFrame>? _frameSub;
