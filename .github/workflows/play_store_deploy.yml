@@ -1,0 +1,89 @@
+name: Deploy to Google Play (Closed Testing)
+
+# Push a tag to ship:  git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: # allow a manual run from the Actions tab
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PACKAGE_NAME: com.rahma.moovnow
+  APP_DIR: android_app
+
+jobs:
+  deploy:
+    name: Build & Ship to Closed Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get Flutter Packages
+        run: flutter pub get
+        working-directory: ${{ env.APP_DIR }}
+
+      - name: Decode Android Keystore
+        run: |
+          mkdir -p "$APP_DIR/android/app"
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$APP_DIR/android/app/upload-keystore.jks"
+
+      - name: Create key.properties
+        run: |
+          cat > "$APP_DIR/android/key.properties" <<EOF
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          storeFile=../app/upload-keystore.jks
+          EOF
+
+      # versionName comes from the tag (v1.2.3 -> 1.2.3) and versionCode from the
+      # workflow run number, so every tag produces a strictly increasing build
+      # that Play will accept without editing pubspec.yaml by hand.
+      - name: Build Release App Bundle (.aab)
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="1.0.$(date +%s)"
+          fi
+          echo "Building versionName=$TAG versionCode=${{ github.run_number }}"
+          flutter build appbundle --release \
+            --build-name="$TAG" \
+            --build-number=${{ github.run_number }}
+        working-directory: ${{ env.APP_DIR }}
+
+      - name: Create Release Notes
+        run: |
+          mkdir -p "$APP_DIR/android/whatsnew"
+          git log -1 --pretty=%s > "$APP_DIR/android/whatsnew/whatsnew-en-US"
+
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE_NAME }}
+          releaseFiles: ${{ env.APP_DIR }}/build/app/outputs/bundle/release/app-release.aab
+          track: alpha # alpha = Closed Testing
+          status: completed
+          whatsNewDirectory: ${{ env.APP_DIR }}/android/whatsnew
+
+      - name: Upload .aab as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: ${{ env.APP_DIR }}/build/app/outputs/bundle/release/app-release.aab
+          retention-days: 14

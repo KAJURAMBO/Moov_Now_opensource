@@ -52,6 +52,30 @@ env/
 .pytest_cache/
 
 # ---------------------------------------------------------------------------
+# Android / Flutter
+# ---------------------------------------------------------------------------
+# Signing material — supplied via CI secrets, never committed
+android_app/android/key.properties
+android_app/android/app/*.jks
+android_app/android/app/*.keystore
+*.jks
+*.keystore
+key.properties
+
+# Build output
+android_app/build/
+android_app/.dart_tool/
+android_app/.flutter-plugins
+android_app/.flutter-plugins-dependencies
+android_app/android/.gradle/
+android_app/android/local.properties
+android_app/android/app/debug/
+android_app/android/app/profile/
+android_app/android/app/release/
+android_app/**/*.iml
+.gradle/
+
+# ---------------------------------------------------------------------------
 # Editors / OS
 # ---------------------------------------------------------------------------
 .vscode/

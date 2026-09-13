@@ -27,6 +27,10 @@ d:\MOOV DEVICE CONNECT\
 │   ├── main.py                 # Web server & WebSocket endpoint
 │   ├── ble_bridge.py           # Bleak BLE client, auto-connect engine & telemetry broadcaster
 │   └── models.py               # SQLite database layer
+├── android_app/                # Local-only native Android tracker (Flutter)
+│   ├── lib/moov/               # BLE manager, packet decoder, protocol constants
+│   ├── lib/data/               # Local SQLite storage
+│   └── lib/main.dart           # UI: Today, Live, Workout, History
 ├── frontend/                   # Phase 3 Cyberpunk/Neon UI
 │   ├── index.html              # Dashboard shell
 │   ├── styles.css              # Custom design system with glassmorphic cards
@@ -94,6 +98,7 @@ its own, no UI interaction needed.
 | `REVIVAL_NOTES.md` | Work log: every bug found and fixed, device power behaviour, known limitations |
 | `ble_tools/protocol_notes.md` | Verified BLE protocol — GATT map, connect/stream sequence, packet format |
 | `ANDROID_PORT.md` | Spec for a local-only native Android tracker (no backend, no cloud) |
+| `android_app/README.md` | Android app: layout, how it talks to the device, releasing |
 
 ---
 
