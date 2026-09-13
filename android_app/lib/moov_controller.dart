@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'data/moov_database.dart';
 import 'moov/moov_ble_manager.dart';
+import 'moov/moov_foreground.dart';
 import 'moov/moov_decoder.dart';
 
 /// Application state: owns the BLE link, the database, and the live session.
@@ -66,10 +67,21 @@ class MoovController extends ChangeNotifier {
   Future<void> init() async {
     await _ble.ensurePermissions();
 
+    // Hold a foreground service so the link survives screen-lock. Started
+    // before scanning so the app can also acquire a connection in the
+    // background, not just keep one.
+    await MoovForeground.requestPermission();
+    await MoovForeground.start(text: 'Looking for your Moov…');
+
     _frameSub = _ble.frames.listen(_onFrame);
     _stateSub = _ble.state.listen((s) {
       connectionState = s;
       if (s == MoovConnectionState.connected) deviceName = _ble.deviceName;
+      MoovForeground.start(
+        text: s == MoovConnectionState.connected
+            ? 'Tracking ${_ble.deviceName}'
+            : 'Looking for your Moov…',
+      );
       notifyListeners();
     });
 
@@ -194,6 +206,7 @@ class MoovController extends ChangeNotifier {
 
   @override
   void dispose() {
+    MoovForeground.stop();
     _flushTimer?.cancel();
     _frameSub?.cancel();
     _stateSub?.cancel();

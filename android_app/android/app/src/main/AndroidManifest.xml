@@ -17,6 +17,18 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!--
+        Foreground service. Android freezes a backgrounded app, which stops BLE
+        scanning and drops the GATT link the moment the phone is locked. A
+        foreground service is the only supported way to keep a BLE connection
+        alive with the screen off. Type "connectedDevice" is the one that
+        matches talking to an external device over Bluetooth.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- BLE is required; without it the app has nothing to talk to. -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
@@ -46,6 +58,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Keeps the process alive so the BLE link survives screen-lock. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

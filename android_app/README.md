@@ -60,8 +60,8 @@ The short version; the full spec is in `../ble_tools/protocol_notes.md`.
   cannot be auto-detected — pick it from the workout tabs.
 - The step counter is an edge-triggered accelerometer heuristic, not the vendor's algorithm.
   It is plausible, not validated.
-- Streaming stops when the app is backgrounded — a foreground service is not implemented yet
-  (see `../ANDROID_PORT.md`).
+- Tracking continues with the screen off via a foreground service, at the cost of a persistent
+  notification (Android requires one for background BLE).
 
 ## Releasing
 
