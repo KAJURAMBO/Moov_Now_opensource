@@ -293,6 +293,8 @@ class LiveScreen extends StatelessWidget {
               _DiagRow('write attempts', '${ble.writeAttempts}'),
               _DiagRow('packets received', '${ble.packetsReceived}'),
               _DiagRow('last packet', ble.lastPacketHex.isEmpty ? '-' : ble.lastPacketHex),
+              _DiagRow('remembered MAC', ble.knownMoovAddr.isEmpty ? '(none yet)' : ble.knownMoovAddr),
+              _DiagRow('scanning for MAC', ble.usingKnownAddress ? 'yes (targeted)' : 'no (all devices)'),
               _DiagRow('matched by', ble.lastMatchKind.isEmpty ? '-' : ble.lastMatchKind),
               _DiagRow('name / fallback', '${ble.nameMatches} / ${ble.fallbackMatches}'),
               _DiagRow('adv name', ble.lastCandidateAdvName.isEmpty ? '(empty)' : ble.lastCandidateAdvName),

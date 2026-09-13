@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'moov_decoder.dart';
 import 'moov_foreground.dart';
@@ -63,10 +64,12 @@ class MoovBleManager {
   // -80, not -65. The Moov was connecting at -70 to -86 dBm on the desktop;
   // a -65 cutoff meant nothing ever qualified and the app scanned forever.
   static const int _fallbackRssi = -80;
-  /// MAC of a device that has already been confirmed as the Moov this session.
-  /// Connecting to a known-good address immediately skips the whole
-  /// name/fallback decision on every reconnect.
+  /// MAC of a device already confirmed as the Moov. Persisted, so once the
+  /// app has connected even once it can scan for that exact address and skip
+  /// the name/fallback guesswork entirely - the way a watch reconnects.
+  static const String _prefsKey = 'moov_known_addr';
   String knownMoovAddr = '';
+  bool usingKnownAddress = false;
 
   BluetoothDevice? get device => _device;
   String get deviceName => _device?.platformName.isNotEmpty == true
@@ -117,7 +120,35 @@ class MoovBleManager {
     if (_autoConnectRunning) return;
     _autoConnectRunning = true;
     _scanSub ??= FlutterBluePlus.scanResults.listen(_onScanResults);
+    await _loadKnownAddress();
     unawaited(_scanLoop());
+  }
+
+  Future<void> _loadKnownAddress() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      knownMoovAddr = prefs.getString(_prefsKey) ?? '';
+    } catch (_) {
+      knownMoovAddr = '';
+    }
+  }
+
+  Future<void> _saveKnownAddress(String addr) async {
+    if (addr.isEmpty || addr == knownMoovAddr) return;
+    knownMoovAddr = addr;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKey, addr);
+    } catch (_) {}
+  }
+
+  /// Forgets the remembered device - useful if the Moov is replaced.
+  Future<void> forgetKnownDevice() async {
+    knownMoovAddr = '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefsKey);
+    } catch (_) {}
   }
 
   /// Keeps one long scan running while disconnected.
@@ -135,9 +166,14 @@ class MoovBleManager {
       _setState(MoovConnectionState.scanning);
       try {
         scanStarts++;
+        // Once the Moov's address is known, scan for that address alone.
+        // Android then reports only that device, so there is no junk to
+        // mis-connect to and no name/fallback decision to make.
+        usingKnownAddress = knownMoovAddr.isNotEmpty;
         await FlutterBluePlus.startScan(
           timeout: const Duration(seconds: 25),
           continuousUpdates: true,
+          withRemoteIds: usingKnownAddress ? [knownMoovAddr] : const [],
         );
       } catch (e) {
         lastError = 'scan: $e';
@@ -279,8 +315,8 @@ class MoovBleManager {
     enableCharFound = true;
     await _writeEnable();
 
-    // Proven Moov - remember it so reconnects skip the discovery dance.
-    knownMoovAddr = device.remoteId.str;
+    // Proven Moov - remember it so future scans target this address directly.
+    await _saveKnownAddress(device.remoteId.str);
 
     _decoder.reset();
     _lastFrameAt = DateTime.now();
