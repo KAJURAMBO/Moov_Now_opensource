@@ -37,6 +37,16 @@ jobs:
         run: flutter pub get
         working-directory: ${{ env.APP_DIR }}
 
+      # Fail before we build or upload: a broken decoder or a lint error should
+      # stop the release here, not ship to closed testing.
+      - name: Analyze
+        run: flutter analyze
+        working-directory: ${{ env.APP_DIR }}
+
+      - name: Test
+        run: flutter test
+        working-directory: ${{ env.APP_DIR }}
+
       - name: Decode Android Keystore
         run: |
           mkdir -p "$APP_DIR/android/app"
