@@ -166,14 +166,14 @@ class MoovBleManager {
       _setState(MoovConnectionState.scanning);
       try {
         scanStarts++;
-        // Once the Moov's address is known, scan for that address alone.
-        // Android then reports only that device, so there is no junk to
-        // mis-connect to and no name/fallback decision to make.
+        // Always scan broadly. Filtering the scan to the remembered address
+        // was a mistake: if that address was wrong, the scan matched nothing
+        // and the app could never connect again. The remembered address is
+        // used as a *priority* in _onScanResults instead, which is safe.
         usingKnownAddress = knownMoovAddr.isNotEmpty;
         await FlutterBluePlus.startScan(
           timeout: const Duration(seconds: 25),
           continuousUpdates: true,
-          withRemoteIds: usingKnownAddress ? [knownMoovAddr] : const [],
         );
       } catch (e) {
         lastError = 'scan: $e';
@@ -190,8 +190,11 @@ class MoovBleManager {
       final addr0 = r.device.remoteId.str;
       if (_blacklist.contains(addr0)) continue;
 
-      // Fast path: we have already proven this address is the Moov.
-      if (knownMoovAddr.isNotEmpty && addr0 == knownMoovAddr) {
+      // Priority: an address already proven to be the Moov. Compares
+      // case-insensitively because Android and this app have disagreed on
+      // MAC casing before.
+      if (knownMoovAddr.isNotEmpty &&
+          addr0.toLowerCase() == knownMoovAddr.toLowerCase()) {
         lastMatchKind = 'known';
         nameMatches++;
         _beginConnect(r.device);
@@ -315,7 +318,8 @@ class MoovBleManager {
     enableCharFound = true;
     await _writeEnable();
 
-    // Proven Moov - remember it so future scans target this address directly.
+    // Proven Moov. Overwrites any previously remembered address, so a bad
+    // entry from an earlier version self-corrects on the next good connection.
     await _saveKnownAddress(device.remoteId.str);
 
     _decoder.reset();

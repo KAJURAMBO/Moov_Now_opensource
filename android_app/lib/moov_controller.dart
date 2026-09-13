@@ -206,6 +206,13 @@ class MoovController extends ChangeNotifier {
 
   Future<List<Map<String, Object?>>> workouts() => _db.getWorkouts();
 
+  /// Clears the remembered Moov address. Recovers from a bad entry without
+  /// reinstalling the app.
+  Future<void> forgetDevice() async {
+    await _ble.forgetKnownDevice();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     MoovForeground.stop();
