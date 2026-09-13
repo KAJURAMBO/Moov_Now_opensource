@@ -85,6 +85,10 @@ android_app/**/*.iml
 service-account*.json
 *service*account*.json
 
+# Signed release artifacts downloaded from CI - never commit these
+ci-artifact/
+*.aab
+
 # ---------------------------------------------------------------------------
 # Editors / OS
 # ---------------------------------------------------------------------------
