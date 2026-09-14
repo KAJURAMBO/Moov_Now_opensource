@@ -301,7 +301,7 @@ class LiveScreen extends StatelessWidget {
               _DiagRow('name / fallback', '${ble.nameMatches} / ${ble.fallbackMatches}'),
               _DiagRow('adv name', ble.lastCandidateAdvName.isEmpty ? '(empty)' : ble.lastCandidateAdvName),
               _DiagRow('candidate', ble.lastCandidate.isEmpty ? '-' : ble.lastCandidate),
-              _DiagRow('blacklisted', '${ble.blacklistSize}'),
+              _DiagRow('blacklisted', '${ble.blacklistSize} (after ${MoovBleManager.maxStrikes} strikes)'),
               _DiagRow('scan starts', '${ble.scanStarts}'),
               _DiagRow('bg service', MoovForeground.running ? 'running' : 'NOT running'),
               _DiagRow('battery exempt', MoovForeground.batteryExempt ? 'yes' : 'no'),

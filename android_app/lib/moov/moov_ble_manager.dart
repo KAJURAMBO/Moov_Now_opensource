@@ -62,6 +62,8 @@ class MoovBleManager {
   String lastCandidate = '';
   String _lastCandidateAddr = '';
   final Set<String> _blacklist = {};
+  final Map<String, int> _failCounts = {};
+  static const int maxStrikes = 3;
   int get blacklistSize => _blacklist.length;
 
   StreamSubscription<List<int>>? _valueSub;
@@ -188,6 +190,7 @@ class MoovBleManager {
         await FlutterBluePlus.startScan(
           timeout: const Duration(seconds: 25),
           continuousUpdates: true,
+          withRemoteIds: knownMoovAddr.isNotEmpty ? [knownMoovAddr] : [],
         );
       } catch (e) {
         lastError = 'scan: $e';
@@ -311,9 +314,20 @@ class MoovBleManager {
         await FlutterBluePlus.stopScan();
         _setState(MoovConnectionState.connecting);
         await _connect(d);
+        // Success — clear any prior failure count for this address.
+        _failCounts.remove(_lastCandidateAddr);
       } catch (e) {
         lastError = e.toString();
-        if (_lastCandidateAddr.isNotEmpty) _blacklist.add(_lastCandidateAddr);
+        // 3-strike blacklist, matching the Python ble_bridge.py. The Moov
+        // often fails once due to timing but succeeds on retry; a 1-strike
+        // ban permanently locked out the real device.
+        if (_lastCandidateAddr.isNotEmpty) {
+          final strikes = (_failCounts[_lastCandidateAddr] ?? 0) + 1;
+          _failCounts[_lastCandidateAddr] = strikes;
+          if (strikes >= maxStrikes) {
+            _blacklist.add(_lastCandidateAddr);
+          }
+        }
         _setState(MoovConnectionState.waitingForDevice);
       } finally {
         _connectInProgress = false;
@@ -435,8 +449,17 @@ class MoovBleManager {
     _valueSub = null;
     _enableChar = null;
     _device = null;
+    _connectInProgress = false;
+    // Clear stale scan state so the next button press is evaluated fresh.
+    _sightings.clear();
+    _fallbackCandidate = null;
     _setState(MoovConnectionState.waitingForDevice);
-    // The scan loop observes the cleared device and resumes scanning.
+    // Force-restart scanning. The scanLoop may be awaiting the previous
+    // startScan's timeout; stopping it ensures a fresh scan starts immediately
+    // so the device can be caught on its next advertisement burst.
+    unawaited(() async {
+      try { await FlutterBluePlus.stopScan(); } catch (_) {}
+    }());
   }
 
   // ---------------------------------------------------------------------------
