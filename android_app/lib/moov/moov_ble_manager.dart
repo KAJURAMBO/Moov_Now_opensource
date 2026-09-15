@@ -201,6 +201,7 @@ class MoovBleManager {
       _setState(MoovConnectionState.scanning);
       try {
         scanStarts++;
+        debugPrint('[_scanLoop] starting scan #$scanStarts');
         usingKnownAddress = knownMoovAddr.isNotEmpty;
         // Open broadcast scan — no service filters. The Moov advertises as
         // an unnamed device with no service UUIDs in its advertisement, so
@@ -211,6 +212,9 @@ class MoovBleManager {
         );
       } catch (e) {
         lastError = 'scan: $e';
+        debugPrint('[_scanLoop] ERROR: $e');
+        // Stop any lingering scan first, then back off
+        try { await FlutterBluePlus.stopScan(); } catch (_) {}
         await Future.delayed(const Duration(seconds: 2));
       }
     }
