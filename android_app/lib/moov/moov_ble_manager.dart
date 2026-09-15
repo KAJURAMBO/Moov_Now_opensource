@@ -206,10 +206,14 @@ class MoovBleManager {
         // Open broadcast scan — no service filters. The Moov advertises as
         // an unnamed device with no service UUIDs in its advertisement, so
         // filtering by service UUID (as the original APK did) would miss it.
-        await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 25),
-          androidScanMode: AndroidScanMode.lowLatency,
-        );
+        try {
+          await FlutterBluePlus.startScan(
+            timeout: const Duration(seconds: 25),
+            androidScanMode: AndroidScanMode.lowLatency,
+          );
+        } finally {
+          debugPrint('[_scanLoop] scan #$scanStarts completed');
+        }
       } catch (e) {
         lastError = 'scan: $e';
         debugPrint('[_scanLoop] ERROR: $e');
