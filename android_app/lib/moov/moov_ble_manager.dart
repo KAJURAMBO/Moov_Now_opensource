@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -85,6 +87,16 @@ class MoovBleManager {
   static const String _prefsKey = 'moov_known_addr';
   String knownMoovAddr = '';
   bool usingKnownAddress = false;
+
+  // ---- connection strategy (ported from original APK's BluetoothLeServiceCore)
+  static const MethodChannel _platform =
+      MethodChannel('com.rahma.moovnow/ble');
+  static const int _connectionTimeoutMs = 15000; // matches original APK default
+  static const int _motorolaTimeoutMs = 25000;  // Motorola chips are slower
+  static const int _maxConnectAttempts = 3;     // close-gatt-and-reconnect loop
+  int get _effectiveTimeoutMs => _isMotorola ? _motorolaTimeoutMs : _connectionTimeoutMs;
+  bool get _isMotorola => _manufacturer?.toLowerCase().contains('motorola') ?? false;
+  String? _manufacturer;
 
   BluetoothDevice? get device => _device;
   String get deviceName => _device?.platformName.isNotEmpty == true
@@ -340,59 +352,126 @@ class MoovBleManager {
 
   bool get _isConnected => _device?.isConnected ?? false;
 
+  /// Connects to the device and sets up the GATT pipeline.
+  ///
+  /// Mirrors the original APK's [BluetoothLeServiceCore.doConnect]:
+  ///  - Uses a 15 s connection timeout (25 s on Motorola).
+  ///  - After gatt is established, discovers services. If service discovery
+  ///    stalls (stale gatt cache), closes the gatt and reconnects — up to
+  ///    [_maxConnectAttempts] times. This matches the APK's reconnect-on-
+  ///    timeout behavior in onConnectionStateChange (line 988-1003).
   Future<void> _connect(BluetoothDevice device) async {
-    // Short timeout: the Moov answers immediately when awake, and a wrong
-    // device should fail fast rather than block the queue.
-    await device.connect(timeout: const Duration(seconds: 8));
-    _device = device;
+    if (_manufacturer == null) {
+      try {
+        _manufacturer = await _platform.invokeMethod<String>('getManufacturer');
+      } catch (_) {
+        _manufacturer = 'unknown';
+      }
+    }
 
-    // Recover automatically when the link drops (the firmware sleeps the
-    // stream regularly, and the link occasionally follows).
+    Exception? lastError;
+    for (var attempt = 1; attempt <= _maxConnectAttempts; attempt++) {
+      try {
+        if (attempt > 1) {
+          // Force-close the previous gatt (drops any stale cache) before
+          // retrying connectGatt. This is the APK's internalCloseGatt +
+          // internalConnect pattern.
+          await _forceDisconnect(device);
+        }
+
+        _setState(MoovConnectionState.connecting);
+        await device.connect(
+          timeout: Duration(milliseconds: _effectiveTimeoutMs),
+          autoConnect: false, // direct connection, like the original SDK
+        );
+        _device = device;
+
+        // Listen for unexpected disconnection.
+        await _connSub?.cancel();
+        _connSub = device.connectionState.listen((s) {
+          if (s == BluetoothConnectionState.disconnected) _onDisconnected();
+        });
+
+        // Discover services. Wrap in a timeout so a stalled gatt doesn't
+        // block us forever — if it hangs, close the gatt and reconnect.
+        final services = await device.discoverServices().timeout(
+          Duration(milliseconds: _effectiveTimeoutMs),
+          onTimeout: () {
+            throw TimeoutException(
+              'Service discovery timed out after $_effectiveTimeoutMs ms',
+              Duration(milliseconds: _effectiveTimeoutMs),
+            );
+          },
+        );
+
+        servicesFound = services.length;
+        serviceUuids = services.map((x) => x.uuid.str.toLowerCase()).toList();
+
+        final service = services.firstWhere(
+          (s) => s.uuid.str.toLowerCase() == moovServiceUuid,
+          orElse: () => throw StateError(
+              'not a Moov: no f000cd50 among ${services.length} services'),
+        );
+
+        // 1. Subscribe to the data characteristic only.
+        final dataChar = service.characteristics.firstWhere(
+          (c) => c.uuid.str.toLowerCase() == moovDataCharUuid,
+          orElse: () => throw StateError('data char not found'),
+        );
+        dataCharFound = true;
+        await dataChar.setNotifyValue(true);
+        notifySubscribed = true;
+        _valueSub = dataChar.onValueReceived.listen(_onPacket);
+
+        // Let the CCCD write settle before issuing the enable write. Android
+        // can drop a characteristic write issued in the same breath as
+        // setNotifyValue.
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // 2. Enable the stream. Only cd52 — writing cd53/cd54 drops the link.
+        _enableChar = service.characteristics.firstWhere(
+          (c) => c.uuid.str.toLowerCase() == moovEnableCharUuid,
+          orElse: () => throw StateError('enable char not found'),
+        );
+        enableCharFound = true;
+        await _writeEnable();
+
+        // Proven Moov. Overwrites any previously remembered address, so a bad
+        // entry from an earlier version self-corrections on the next good
+        // connection.
+        await _saveKnownAddress(device.remoteId.str);
+
+        _decoder.reset();
+        _lastFrameAt = DateTime.now();
+        _setState(MoovConnectionState.connected);
+        _startKeepAlive();
+        return; // success — exit the retry loop
+      } catch (e) {
+        lastError = e.toString();
+        final isLastAttempt = attempt == _maxConnectAttempts;
+        debugPrint('[_connect] attempt $attempt/${_maxConnectAttempts} failed: $e');
+        if (!isLastAttempt) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+
+    // All attempts exhausted.
+    throw StateError(
+        'Failed to connect and discover services after '
+        '$_maxConnectAttempts attempts. Last error: $lastError');
+  }
+
+  /// Force-disconnect and drop the gatt handle so the next connectGatt()
+  /// creates a fresh gatt (clearing any stale service/char cache).
+  Future<void> _forceDisconnect(BluetoothDevice device) async {
+    await _valueSub?.cancel();
     await _connSub?.cancel();
-    _connSub = device.connectionState.listen((s) {
-      if (s == BluetoothConnectionState.disconnected) _onDisconnected();
-    });
-
-    final services = await device.discoverServices();
-    servicesFound = services.length;
-    serviceUuids = services.map((x) => x.uuid.str.toLowerCase()).toList();
-
-    final service = services.firstWhere(
-      (s) => s.uuid.str.toLowerCase() == moovServiceUuid,
-      orElse: () => throw StateError(
-          'not a Moov: no f000cd50 among ${services.length} services'),
-    );
-
-    // 1. Subscribe to the data characteristic only.
-    final dataChar = service.characteristics.firstWhere(
-      (c) => c.uuid.str.toLowerCase() == moovDataCharUuid,
-      orElse: () => throw StateError('data char not found'),
-    );
-    dataCharFound = true;
-    await dataChar.setNotifyValue(true);
-    notifySubscribed = true;
-    _valueSub = dataChar.onValueReceived.listen(_onPacket);
-
-    // Let the CCCD write settle before issuing the enable write. Android can
-    // drop a characteristic write issued in the same breath as setNotifyValue.
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // 2. Enable the stream. Only cd52 — writing cd53/cd54 drops the link.
-    _enableChar = service.characteristics.firstWhere(
-      (c) => c.uuid.str.toLowerCase() == moovEnableCharUuid,
-      orElse: () => throw StateError('enable char not found'),
-    );
-    enableCharFound = true;
-    await _writeEnable();
-
-    // Proven Moov. Overwrites any previously remembered address, so a bad
-    // entry from an earlier version self-corrects on the next good connection.
-    await _saveKnownAddress(device.remoteId.str);
-
-    _decoder.reset();
-    _lastFrameAt = DateTime.now();
-    _setState(MoovConnectionState.connected);
-    _startKeepAlive();
+    try {
+      await device.disconnect();
+    } catch (_) {}
+    // brief pause so the OS releases the gatt handle
+    await Future.delayed(const Duration(milliseconds: 200));
   }
 
   Future<void> _writeEnable() async {
