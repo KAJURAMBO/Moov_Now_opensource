@@ -76,10 +76,8 @@ class MoovBleManager {
   bool _connectInProgress = false;
   BluetoothDevice? _fallbackCandidate;
   final Map<String, int> _sightings = {};
-  static const int _sightingsNeeded = 2;   // seen on 2 separate scan emissions
-  // -80, not -65. The Moov was connecting at -70 to -86 dBm on the desktop;
-  // a -65 cutoff meant nothing ever qualified and the app scanned forever.
-  static const int _fallbackRssi = -80;
+  static const int _sightingsNeeded = 1;   // latch on first scan emission
+  static const int _fallbackRssi = -90;    // catch signals down to -90 dBm
   /// MAC of a device already confirmed as the Moov. Persisted, so once the
   /// app has connected even once it can scan for that exact address and skip
   /// the name/fallback guesswork entirely - the way a watch reconnects.
