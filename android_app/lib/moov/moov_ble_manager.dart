@@ -74,10 +74,7 @@ class MoovBleManager {
   bool _autoConnectRunning = false;
   bool _enablingStream = false;
   bool _connectInProgress = false;
-  BluetoothDevice? _fallbackCandidate;
-  final Map<String, int> _sightings = {};
-  static const int _sightingsNeeded = 1;   // latch on first scan emission
-  static const int _fallbackRssi = -90;    // catch signals down to -90 dBm
+
   /// MAC of a device already confirmed as the Moov. Persisted, so once the
   /// app has connected even once it can scan for that exact address and skip
   /// the name/fallback guesswork entirely - the way a watch reconnects.
@@ -171,6 +168,12 @@ class MoovBleManager {
   /// scan / stop / scan cycle every 8 s sat right on that limit, so the OS
   /// delayed the scans and connecting felt slow. A single long scan with a
   /// periodic restart stays well under it.
+  /// Common non-Moov electronic device name fragments to exclude from signal sniping.
+  static const List<String> _excludedDeviceKeywords = [
+    'iphone', 'watch', 'apple', 'versa', 'livsmt', 'washer', 'tv', 'galaxy',
+    'pixel', 'airpods', 'buds', 'headset', 'macbook', 'desktop', 'audio', 'soundbar'
+  ];
+
   Future<void> _scanLoop() async {
     while (_autoConnectRunning) {
       if (_connectInProgress || (_device != null && _isConnected)) {
@@ -180,15 +183,12 @@ class MoovBleManager {
       _setState(MoovConnectionState.scanning);
       try {
         scanStarts++;
-        // Always scan broadly. Filtering the scan to the remembered address
-        // was a mistake: if that address was wrong, the scan matched nothing
-        // and the app could never connect again. The remembered address is
-        // used as a *priority* in _onScanResults instead, which is safe.
         usingKnownAddress = knownMoovAddr.isNotEmpty;
+        // Always run open scanning so any active Moov button press signal burst
+        // is sniped instantly.
         await FlutterBluePlus.startScan(
           timeout: const Duration(seconds: 25),
           continuousUpdates: true,
-          withRemoteIds: knownMoovAddr.isNotEmpty ? [knownMoovAddr] : [],
         );
       } catch (e) {
         lastError = 'scan: $e';
@@ -207,9 +207,7 @@ class MoovBleManager {
       final addr0 = r.device.remoteId.str;
       if (_blacklist.contains(addr0)) continue;
 
-      // Priority: an address already proven to be the Moov. Compares
-      // case-insensitively because Android and this app have disagreed on
-      // MAC casing before.
+      // Priority 1: An address already confirmed to be the Moov.
       if (knownMoovAddr.isNotEmpty &&
           addr0.toLowerCase() == knownMoovAddr.toLowerCase()) {
         lastMatchKind = 'known';
@@ -220,6 +218,12 @@ class MoovBleManager {
 
       final name = r.device.platformName.toLowerCase();
       final advName = r.advertisementData.advName.toLowerCase();
+      final rawName = advName.isNotEmpty ? advName : name;
+
+      // Exclude common nearby consumer electronics (phones, watches, TVs)
+      final isExcluded = _excludedDeviceKeywords.any((ex) => rawName.contains(ex));
+      if (isExcluded) continue;
+
       final nameMatch =
           moovNameHints.any((h) => name.contains(h) || advName.contains(h));
       final svcUuids =
@@ -227,10 +231,8 @@ class MoovBleManager {
       final uuidMatch =
           svcUuids.any((u) => moovAdvUuids.any((frag) => u.contains(frag)));
 
+      // Priority 2: Explicit Moov name hint or service UUID match.
       if (nameMatch || uuidMatch) {
-        // Recorded so the Diagnostics panel shows whether Android is actually
-        // reporting an advertised name. If it never matches here, every
-        // connection is going through the slow fallback path.
         lastMatchKind = nameMatch ? 'name' : 'uuid';
         nameMatches++;
         lastCandidateAdvName = r.advertisementData.advName;
@@ -238,29 +240,14 @@ class MoovBleManager {
         return;
       }
 
-      // The Moov normally advertises as an unnamed device with no service
-      // UUIDs, so signal strength is the only remaining clue.
-      //
-      // This used to connect to the first strong device it saw, which meant
-      // burning a 15 s connect timeout on a nearby non-Moov while the user
-      // was pressing their actual device. The fallback now has to be seen on
-      // several separate scan emissions and be genuinely close, so a device
-      // that merely drifts past is ignored.
-      final addr = r.device.remoteId.str;
-      if (r.rssi > _fallbackRssi) {
-        _sightings[addr] = (_sightings[addr] ?? 0) + 1;
-        if (_sightings[addr]! >= _sightingsNeeded) {
-          _fallbackCandidate ??= r.device;
-        }
+      // Priority 3: Dynamic Sniper — Strong active signal burst (> -75 dBm) from
+      // an unnamed/non-excluded device right when the user presses the button.
+      if (r.rssi > -75) {
+        lastMatchKind = 'signal-sniper';
+        fallbackMatches++;
+        _beginConnect(r.device);
+        return;
       }
-    }
-
-    final fb = _fallbackCandidate;
-    if (fb != null && !_blacklist.contains(fb.remoteId.str)) {
-      lastMatchKind = 'fallback';
-      fallbackMatches++;
-      _fallbackCandidate = null;
-      _beginConnect(fb);
     }
   }
 
@@ -286,7 +273,7 @@ class MoovBleManager {
           r.advertisementData.serviceUuids.any((g) =>
               moovAdvUuids.any((f) => g.str.toLowerCase().contains(f)))) {
         verdict = 'name-match';
-      } else if (r.rssi > _fallbackRssi) {
+      } else if (r.rssi > -75) {
         verdict = 'candidate';
       } else {
         verdict = 'ignored';
@@ -447,10 +434,6 @@ class MoovBleManager {
     _valueSub = null;
     _enableChar = null;
     _device = null;
-    _connectInProgress = false;
-    // Clear stale scan state so the next button press is evaluated fresh.
-    _sightings.clear();
-    _fallbackCandidate = null;
     _setState(MoovConnectionState.waitingForDevice);
     // Force-restart scanning. The scanLoop may be awaiting the previous
     // startScan's timeout; stopping it ensures a fresh scan starts immediately
