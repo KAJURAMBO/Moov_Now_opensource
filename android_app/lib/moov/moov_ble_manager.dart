@@ -202,9 +202,14 @@ class MoovBleManager {
         // Always run open scanning so any active Moov button press signal burst
         // is sniped instantly.
         await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 25),
-          continuousUpdates: true,
+          timeout: const Duration(seconds: 10),
+          androidScanMode: AndroidScanMode.lowLatency,
         );
+        // Wait for results to buffer, then restart. Short windows prevent
+        // Android from throttling and let us catch the 2-3s button burst.
+        await Future.delayed(const Duration(seconds: 9));
+        await FlutterBluePlus.stopScan();
+        await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
         lastError = 'scan: $e';
         await Future.delayed(const Duration(seconds: 2));
@@ -213,6 +218,10 @@ class MoovBleManager {
   }
 
   void _onScanResults(List<ScanResult> results) {
+    if (results.isNotEmpty) {
+      debugPrint('[_scanResults] got ${results.length} devices: '
+          '${results.map((r) => "${r.device.remoteId.str}:${r.rssi}dBm").join(", ")}');
+    }
     _publishScanList(results);
 
     if (_connectInProgress) return;
