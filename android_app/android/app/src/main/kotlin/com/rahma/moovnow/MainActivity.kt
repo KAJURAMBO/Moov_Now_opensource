@@ -14,7 +14,7 @@ class MainActivity : FlutterActivity() {
                 "getManufacturer" -> {
                     result.success(android.os.Build.MANUFACTURER ?: "")
                 }
-                else -> result.notImplemented
+                else -> { result.notImplemented() }
             }
         }
     }
