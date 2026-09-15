@@ -190,6 +190,9 @@ class MoovBleManager {
   ];
 
   Future<void> _scanLoop() async {
+    // Single long scan, matching the original APK's continuous startLeScan.
+    // The 25s timeout is a safety net; the scanResults stream stays active
+    // across the full window and _scanLoop restarts it if needed.
     while (_autoConnectRunning) {
       if (_connectInProgress || (_device != null && _isConnected)) {
         await Future.delayed(const Duration(milliseconds: 500));
@@ -199,17 +202,14 @@ class MoovBleManager {
       try {
         scanStarts++;
         usingKnownAddress = knownMoovAddr.isNotEmpty;
-        // Always run open scanning so any active Moov button press signal burst
-        // is sniped instantly.
+        // Open broadcast scan — no service filters. The Moov advertises as
+        // an unnamed device with no service UUIDs in its advertisement, so
+        // filtering by service UUID (as the original APK did) would miss it.
         await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 10),
+          timeout: const Duration(seconds: 25),
+          continuousUpdates: true,
           androidScanMode: AndroidScanMode.lowLatency,
         );
-        // Wait for results to buffer, then restart. Short windows prevent
-        // Android from throttling and let us catch the 2-3s button burst.
-        await Future.delayed(const Duration(seconds: 9));
-        await FlutterBluePlus.stopScan();
-        await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
         lastError = 'scan: $e';
         await Future.delayed(const Duration(seconds: 2));
@@ -545,12 +545,11 @@ class MoovBleManager {
     _sightings.clear();
     _fallbackCandidate = null;
     _setState(MoovConnectionState.waitingForDevice);
-    // Force-restart scanning. The scanLoop may be awaiting the previous
-    // startScan's timeout; stopping it ensures a fresh scan starts immediately
-    // so the device can be caught on its next advertisement burst.
-    unawaited(() async {
-      try { await FlutterBluePlus.stopScan(); } catch (_) {}
-    }());
+    // Do NOT call stopScan() here — let the ongoing scan (already running in
+    // _scanLoop) continue listening for the Moov's next advertisement. The
+    // device only re-advertises when the button is pressed or it detects
+    // movement, so a continuous scan will catch it. Stopping the scan here
+    // creates a blind window where advertisements are missed.
   }
 
   // ---------------------------------------------------------------------------
