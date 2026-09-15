@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -369,7 +368,7 @@ class MoovBleManager {
       }
     }
 
-    Exception? lastError;
+    String lastError = '';
     for (var attempt = 1; attempt <= _maxConnectAttempts; attempt++) {
       try {
         if (attempt > 1) {
@@ -449,7 +448,7 @@ class MoovBleManager {
       } catch (e) {
         lastError = e.toString();
         final isLastAttempt = attempt == _maxConnectAttempts;
-        debugPrint('[_connect] attempt $attempt/${_maxConnectAttempts} failed: $e');
+        debugPrint('[_connect] attempt $attempt/$_maxConnectAttempts failed: $e');
         if (!isLastAttempt) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
@@ -459,7 +458,8 @@ class MoovBleManager {
     // All attempts exhausted.
     throw StateError(
         'Failed to connect and discover services after '
-        '$_maxConnectAttempts attempts. Last error: $lastError');
+        '$_maxConnectAttempts attempts. Last error: $lastError',
+    );
   }
 
   /// Force-disconnect and drop the gatt handle so the next connectGatt()
