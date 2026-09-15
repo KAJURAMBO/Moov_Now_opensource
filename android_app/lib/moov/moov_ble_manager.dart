@@ -207,7 +207,6 @@ class MoovBleManager {
         // filtering by service UUID (as the original APK did) would miss it.
         await FlutterBluePlus.startScan(
           timeout: const Duration(seconds: 25),
-          continuousUpdates: true,
           androidScanMode: AndroidScanMode.lowLatency,
         );
       } catch (e) {
