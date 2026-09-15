@@ -78,7 +78,7 @@ class MoovBleManager {
   BluetoothDevice? _fallbackCandidate;
   final Map<String, int> _sightings = {};
   static const int _sightingsNeeded = 1;   // latch on first scan emission
-  static const int _fallbackRssi = -75;
+  static const int _fallbackRssi = -90;    // catch signals down to -90 dBm
 
   /// MAC of a device already confirmed as the Moov. Persisted, so once the
   /// app has connected even once it can scan for that exact address and skip
