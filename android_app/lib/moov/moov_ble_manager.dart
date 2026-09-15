@@ -74,6 +74,10 @@ class MoovBleManager {
   bool _autoConnectRunning = false;
   bool _enablingStream = false;
   bool _connectInProgress = false;
+  BluetoothDevice? _fallbackCandidate;
+  final Map<String, int> _sightings = {};
+  static const int _sightingsNeeded = 1;   // latch on first scan emission
+  static const int _fallbackRssi = -75;
 
   /// MAC of a device already confirmed as the Moov. Persisted, so once the
   /// app has connected even once it can scan for that exact address and skip
@@ -240,14 +244,28 @@ class MoovBleManager {
         return;
       }
 
-      // Priority 3: Dynamic Sniper — Strong active signal burst (> -75 dBm) from
-      // an unnamed/non-excluded device right when the user presses the button.
-      if (r.rssi > -75) {
-        lastMatchKind = 'signal-sniper';
-        fallbackMatches++;
-        _beginConnect(r.device);
-        return;
+      // The Moov normally advertises as an unnamed device with no service
+      // UUIDs, so signal strength is the only remaining clue.
+      //
+      // This used to connect to the first strong device it saw, which meant
+      // burning a 15 s connect timeout on a nearby non-Moov while the user
+      // was pressing their actual device. The fallback now has to be seen on
+      // several separate scan emissions and be genuinely close, so a device
+      // that merely drifts past is ignored.
+      if (r.rssi > _fallbackRssi) {
+        _sightings[addr0] = (_sightings[addr0] ?? 0) + 1;
+        if (_sightings[addr0]! >= _sightingsNeeded) {
+          _fallbackCandidate ??= r.device;
+        }
       }
+    }
+
+    final fb = _fallbackCandidate;
+    if (fb != null && !_blacklist.contains(fb.remoteId.str)) {
+      lastMatchKind = 'fallback';
+      fallbackMatches++;
+      _beginConnect(fb);
+      _fallbackCandidate = null;
     }
   }
 
@@ -273,7 +291,7 @@ class MoovBleManager {
           r.advertisementData.serviceUuids.any((g) =>
               moovAdvUuids.any((f) => g.str.toLowerCase().contains(f)))) {
         verdict = 'name-match';
-      } else if (r.rssi > -75) {
+      } else if (r.rssi > _fallbackRssi) {
         verdict = 'candidate';
       } else {
         verdict = 'ignored';
@@ -434,6 +452,10 @@ class MoovBleManager {
     _valueSub = null;
     _enableChar = null;
     _device = null;
+    _connectInProgress = false;
+    // Clear stale scan state so the next button press is evaluated fresh.
+    _sightings.clear();
+    _fallbackCandidate = null;
     _setState(MoovConnectionState.waitingForDevice);
     // Force-restart scanning. The scanLoop may be awaiting the previous
     // startScan's timeout; stopping it ensures a fresh scan starts immediately
