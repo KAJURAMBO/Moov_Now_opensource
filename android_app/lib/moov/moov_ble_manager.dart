@@ -395,9 +395,18 @@ class MoovBleManager {
         }
 
         _setState(MoovConnectionState.connecting);
+        // For a known Moov MAC, use autoConnect=true. Android's BLE stack
+        // will silently reconnect when the device re-advertises — critical
+        // because the Moov stops broadcasting after a disconnect and only
+        // re-advertises on button press. Without autoConnect, the app must
+        // catch the brief advertisement via scanning, which race-conditions
+        // with the 25s scan window.
+        // For first-time connects, autoConnect=false (direct connection).
+        final isKnownMoov = knownMoovAddr.isNotEmpty &&
+            device.remoteId.str.toLowerCase() == knownMoovAddr.toLowerCase();
         await device.connect(
           timeout: Duration(milliseconds: _effectiveTimeoutMs),
-          autoConnect: false, // direct connection, like the original SDK
+          autoConnect: isKnownMoov,
         );
         _device = device;
 
@@ -552,11 +561,11 @@ class MoovBleManager {
     _sightings.clear();
     _fallbackCandidate = null;
     _setState(MoovConnectionState.waitingForDevice);
-    // Do NOT call stopScan() here — let the ongoing scan (already running in
-    // _scanLoop) continue listening for the Moov's next advertisement. The
-    // device only re-advertises when the button is pressed or it detects
-    // movement, so a continuous scan will catch it. Stopping the scan here
-    // creates a blind window where advertisements are missed.
+    // The _scanLoop is still running (we never stopped it in _beginConnect
+    // because stopScan() there cancels the in-progress startScan future).
+    // The scan will restart on the next loop iteration. If the Moov was
+    // a known device (autoConnect=true), Android will auto-reconnect in
+    // the background without needing a scan.
   }
 
   // ---------------------------------------------------------------------------
